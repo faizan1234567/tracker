@@ -1,0 +1,7 @@
+weights/
+utilities/
+*.pdf
+*.csv
+*.pt
+__pycache__/
+tracker/
