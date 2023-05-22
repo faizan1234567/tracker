@@ -5,3 +5,4 @@ utilities/
 *.pt
 __pycache__/
 tracker/
+*.git
