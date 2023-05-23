@@ -175,12 +175,81 @@ If you find this project useful in your research, please consider cite:
 ```bash
 $ python track_v5x.py -h
 $ python track_v5x.py --source 0 --yolo-weights weights/yolov7-tiny.pt --img 640 --compare --save-tracklets --show-vid --hide-conf --classes 0 
-                                                        
-                                            ...
 ```
 In the above code, we are running yolov5 based detector with reidentification and strongsort tracker. Please select
 an appropriate yolov5 detector for your application. It is recommended that yolov5 model is trained on a large dataset
 to detect objects in a video file correctly. Set appropriate image size, recommended size is 416 or 640, but you can try different as per the need. Moreover, ```compare``` commandline flag is set to compare appearance features throughtout the video feed to compare appearance features for lost tracks identification and matching. And, ```save_tracklets``` commandline flag is set to save the appearance data to the file, such as a csv file. 
+
+### code explanation
+In the ```track_v5x.py``` file, we first create a csv file to store data at line 139 - 140 with the following code script.
+
+```python
+tracklets_data = "/home/facit/faizan/tracker/StrongSORT-YOLO/tracklets.csv"
+colnames=['id', 'cls', 'frame', 'bbox', 'appearance']
+```
+In the first line we specify the path to the file and in the subsquent line we add columns names mentioned in the list
+above. For instance, ```id``` stores id of the track which is a unique id of an object in a frame, we also add ```cls``` class of the object, it is always person so this is not gonna change. Next, we add ```frame``` number to specify the frame index for which the track data corresponds. For tracking by detection method, it's very important to detect the object first, for that we also stored ```bbox``` bounding boxes of objects which are useful for localizing the object in a frame. Finally, we need appearance embeddings for accurate data matching, we must store it in the file. We are storing it as ```appearance``` features. Which is n-dimensional vector. 
+
+Then,
+from line 255 - 306 we perform some important processing and matcing steps as mentioned below:
+```python          
+                if outputs[i] is not None:
+                    tracklets = []
+                    if len(outputs[i]) > 0:
+                        for j, (output, conf) in enumerate(zip(outputs[i], confs)):
+                            tracklet = {}
+                            bboxes = output["bbox"]
+                            tracklet["bbox"] = bboxes
+                            id = output["id"]
+                            tracklet["id"] = id
+                            cls = output["cls"]
+                            tracklet["cls"] = cls
+                            output["frame"] = frame_idx
+                            tracklet["frame"] = frame_idx
+                            appearance = output["appearance"]
+                            track = output["track"]
+                            if type(appearance) != list and type(appearance) == np.ndarray:
+                                tracklet["appearance"] = str(appearance.flatten().tolist())
+                            else:
+                                tracklet["appearance"] = appearance
+                            bbox_left, bbox_top, bbox_right, bbox_bottom = bboxes
+
+                            tracklets.append(tracklet)
+                            frame_ids.append(id)
+                            if compare and save_tracklets:
+                                 if os.path.exists(tracklets_data):
+                                    tracks_df = pd.read_csv(tracklets_data, names=colnames, header=None)
+                                    if not tracks_df.empty and frame_idx >= 3:
+                                        ids = unique_ids(tracks_df)
+                                        if id not in ids:
+                                            #-----------------------------------------------------------
+                                            # old code: using the latest appearance
+                                            # previous_tracklets = latest_appearance(tracks_df, ids)
+                                            # assigned_id = compare_appearance(previous_tracklets, tracklet)
+                                            # if assigned_id is not None:
+                                            #     track.track_id = assigned_id
+
+                                            #-------------------------------------------------------------
+
+                                            #code using all previous appearance features
+                                            tic = time.time()
+                                            all_previous_appearances = calculate_matrix_from_df(tracks_df)
+                                            score, index = find_match(all_previous_appearances, appearance)
+                                            assigned_id = get_id(tracks_df, index)
+                                            toc = time.time()
+                                            print(f'Feature matching duration:  {toc - tic}')
+                                            if assigned_id is not None:
+                                                if assigned_id in frame_ids:
+                                                    assigned_id = id
+                                                track.track_id = assigned_id
+
+```
+from line 197 to 210, we are looping over each  track in a frame index, and unpacking the dictionary data returned
+from the strongsort class method named update and storing them in local variables for later use. From 211 - 218, we are checking data type of appearance features and storing tracklet data and append its corresponding id for storing in a csv file in each frame index.
+
+From line 219 - 244 above, we are checking if the user specified ```--compare``` and ```save-tracklets``` command line arguments, if they specified; then, we are checking if the file exists on the path or not, it it does, then we move on to the next step. The next step is to read the file and use it if its not empty and frame index is greater than 3. Its important to check for the new ids in a frame. If a new id appears in a particular frame then we must check if it corresponds to an old id disappeared somewhere in the old frame index. If it does then we need to assign it with the an old id, it is a new id then we need to give it a random number. 
+
+We then check this unique id should not be in old ids. The commented code from 227 to  234 should be used to compare new id with the latest appearance features and not with all data. If this is the case; then, please uncomment this. At line 236, we calculate the appearance matrix from the start frame to current frame using csv file. Then, at 237 line we use this matrix and the current appearance to find matches, if the match exists with old features it will return match score and index. We are calculating this matching using Cosine distance equation. At line 238, we are finding the id that should be assigned to a new track.  And finally, we are assigning this id to dynamic tracker id to make it consistent throughout the track movment. 
 
 
 ## Acknowledgements
